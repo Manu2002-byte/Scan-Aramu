@@ -24,20 +24,19 @@ def salva_in_memoria_storica(codice, tipologia):
     with open(FILE_MEMORIA, "w") as f:
         json.dump(memoria, f)
 
-# Inizializzazione stati dell'app obbligatori
 if "database_merci" not in st.session_state:
     st.session_state.database_merci = {}
 if "codice_corrente" not in st.session_state:
     st.session_state.codice_corrente = None
 
-st.title("🚚 Assistente di Carico")
+st.title("🚚 Assistente di Carico STABILE")
 
 modalita = st.radio("Cosa stai facendo adesso?", ["Fase 1: Carico Furgone (Associa)", "Fase 2: Consegna (Verifica Scarico)"])
 
-def rileva_codice(immagine_interfaccia):
-    if immagine_interfaccia is not None:
+def rileva_codice(file_immagine):
+    if file_immagine is not None:
         try:
-            bytes_data = immagine_interfaccia.getvalue()
+            bytes_data = file_immagine.read()
             cv2_img = cv2.imdecode(np.frombuffer(bytes_data, np.uint8), cv2.IMREAD_COLOR)
             detector = cv2.BarcodeDetector()
             retval, decoded_info, decoded_type = detector.detectAndDecode(cv2_img)
@@ -54,8 +53,9 @@ if modalita == "Fase 1: Carico Furgone (Associa)":
     destinazione = st.text_input("Scrivi la Destinazione (es: Cliente Rossi...)", "").strip()
     
     if destinazione:
-        st.write("Inquadra il codice a barre del collo:")
-        foto_pacco = st.camera_input("Scansiona Codice", key="carico_cam")
+        st.write("Scatta una foto al codice a barre:")
+        # Questo comando apre direttamente la fotocamera nativa dello smartphone senza bug
+        foto_pacco = st.file_uploader("Premi qui per FARE LA FOTO", type=["jpg", "jpeg", "png"], key="carico_file")
         
         if foto_pacco:
             codice = rileva_codice(foto_pacco)
@@ -73,16 +73,15 @@ if modalita == "Fase 1: Carico Furgone (Associa)":
                     st.success(f"🧠 Riconosciuto! **{tipologia_conosciuta}** associato a **{destinazione}**.")
                     st.session_state.codice_corrente = None
                 else:
-                    st.warning(f"🔍 Nuovo codice: **{codice}**. Inserisci il tipo qui sotto.")
+                    st.warning(f"🔍 Nuovo codice rilevato: **{codice}**")
             else:
-                st.error("❌ Codice non letto chiaramente. Riprova o avvicina il codice.")
+                st.error("❌ Codice non rilevato nella foto. Assicurati che sia a fuoco e riprova.")
         
-        # Interfaccia inserimento manuale tipo merce
         if st.session_state.codice_corrente:
-            nuova_tipologia = st.text_input("Scrivi la tipologia (es. Bancale, Sacco, Fusto...):", key="input_tipo").strip()
+            nuova_tipologia = st.text_input("Scrivi cos'è (es. Bancale, Sacco, Fusto...):", key="input_tipo").strip()
             
-            if st.button("Salva tipologia e Associa"):
-                if nuova_tipologia:
+            if st.button("Salva e Associa al furgone"):
+                if nueva_tipologia:
                     cod = st.session_state.codice_corrente
                     salva_in_memoria_storica(cod, nuova_tipologia)
                     st.session_state.database_merci[cod] = {
@@ -90,7 +89,7 @@ if modalita == "Fase 1: Carico Furgone (Associa)":
                         "tipologia": nuova_tipologia, 
                         "scaricato": False
                     }
-                    st.success(f"💾 Salvato '{nuova_tipologia}' per il codice {cod}!")
+                    st.success(f"💾 Salvato!")
                     st.session_state.codice_corrente = None
                 else:
                     st.error("Inserisci un nome per la merce.")
@@ -107,7 +106,7 @@ else:
     destinazioni_disponibili = list(set([info["destinazione"] for info in st.session_state.database_merci.values()]))
     
     if not destinazioni_disponibili:
-        st.info("Il furgone è vuoto! Carica della merce nella Fase 1.")
+        st.info("Il furgone è vuoto!")
     else:
         destinazione_corrente = st.selectbox("Seleziona dove sei arrivato:", destinazioni_disponibili)
         merci_da_consegnare = {k: v for k, v in st.session_state.database_merci.items() if v["destinazione"] == destinazione_corrente}
@@ -121,19 +120,19 @@ else:
             st.write(f"• **{info['tipologia']}** (Cod: {cod}) — Stato: {stato}")
             
         if tutti_scaricati:
-            st.success("🎉 Tutto scaricato per questa destinazione!")
+            st.success("🎉 Tutto scaricato qui!")
         else:
-            st.warning("⚠️ Mancano ancora colli. Scansiona:")
-            foto_scarico = st.camera_input("Scansiona per scaricare", key="scarico_cam")
+            st.warning("⚠️ Mancano colli. Fai una foto al codice per scaricare:")
+            foto_scarico = st.file_uploader("Premi qui per FARE LA FOTO", type=["jpg", "jpeg", "png"], key="scarico_file")
             
             if foto_scarico:
                 codice_scansionato = rileva_codice(foto_scarico)
                 if codice_scansionato:
                     if codice_scansionato in merci_da_consegnare:
                         st.session_state.database_merci[codice_scansionato]["scaricato"] = True
-                        st.success(f"🎯 Verificato lo scarico!")
+                        st.success(f"🎯 Verificato!")
                     elif codice_scansionato in st.session_state.database_merci:
                         dest_corretta = st.session_state.database_merci[codice_scansionato]["destinazione"]
-                        st.error(f"🚨 ERRORE! Questo oggetto va a: **{dest_corretta}**!")
+                        st.error(f"🚨 ERRORE! Questo va a: **{dest_corretta}**!")
                     else:
-                        st.error("❓ Codice non caricato stamattina.")
+                        st.error("❓ Codice sconosciuto.")
