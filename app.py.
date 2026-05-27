@@ -7,13 +7,15 @@ import os
 # Configurazione pagina stile Mobile
 st.set_page_config(page_title="Corriere Scanner App", page_icon="🚚", layout="centered")
 
-# File per mantenere la memoria storica dei codici anche se si chiude l'app
 FILE_MEMORIA = "memoria_merci.json"
 
 def carica_memoria_storica():
     if os.path.exists(FILE_MEMORIA):
         with open(FILE_MEMORIA, "r") as f:
-            return json.load(f)
+            try:
+                return json.load(f)
+            except:
+                return {}
     return {}
 
 def salva_in_memoria_storica(codice, tipologia):
@@ -22,31 +24,34 @@ def salva_in_memoria_storica(codice, tipologia):
     with open(FILE_MEMORIA, "w") as f:
         json.dump(memoria, f)
 
-# Inizializzazione stati dell'app
+# Inizializzazione stati dell'app obbligatori
 if "database_merci" not in st.session_state:
-    st.session_state.database_merci = {}  # Giro di oggi: { codice: {destinazione, tipologia, scaricato} }
+    st.session_state.database_merci = {}
 if "codice_corrente" not in st.session_state:
     st.session_state.codice_corrente = None
 
-st.title("🚚 Assistente di Carico Personalizzabile")
+st.title("🚚 Assistente di Carico")
 
 modalita = st.radio("Cosa stai facendo adesso?", ["Fase 1: Carico Furgone (Associa)", "Fase 2: Consegna (Verifica Scarico)"])
 
 def rileva_codice(immagine_interfaccia):
     if immagine_interfaccia is not None:
-        bytes_data = immagine_interfaccia.getvalue()
-        cv2_img = cv2.imdecode(np.frombuffer(bytes_data, np.uint8), cv2.IMREAD_COLOR)
-        detector = cv2.BarcodeDetector()
-        retval, decoded_info, decoded_type = detector.detectAndDecode(cv2_img)
-        if retval:
-            return decoded_info[0].strip()
+        try:
+            bytes_data = immagine_interfaccia.getvalue()
+            cv2_img = cv2.imdecode(np.frombuffer(bytes_data, np.uint8), cv2.IMREAD_COLOR)
+            detector = cv2.BarcodeDetector()
+            retval, decoded_info, decoded_type = detector.detectAndDecode(cv2_img)
+            if retval and len(decoded_info) > 0:
+                return decoded_info[0].strip()
+        except Exception as e:
+            pass
     return None
 
 # --- FASE 1: CARICO FURGONE ---
 if modalita == "Fase 1: Carico Furgone (Associa)":
     st.header("📦 Associa Merce e Destinazione")
     
-    destinazione = st.text_input("Scrivi la Destinazione (es: Cliente Rossi, Stop 4...)", "").strip()
+    destinazione = st.text_input("Scrivi la Destinazione (es: Cliente Rossi...)", "").strip()
     
     if destinazione:
         st.write("Inquadra il codice a barre del collo:")
@@ -58,7 +63,6 @@ if modalita == "Fase 1: Carico Furgone (Associa)":
                 st.session_state.codice_corrente = codice
                 memoria_storica = carica_memoria_storica()
                 
-                # CONTROLLO MEMORIA: Se lo conosce già, lo associa subito
                 if codice in memoria_storica:
                     tipologia_conosciuta = memoria_storica[codice]
                     st.session_state.database_merci[codice] = {
@@ -66,38 +70,31 @@ if modalita == "Fase 1: Carico Furgone (Associa)":
                         "tipologia": tipologia_conosciuta,
                         "scaricato": False
                     }
-                    st.success(f"🧠 Riconosciuto! **{tipologia_conosciuta}** (Cod: {codice}) associato a **{destinazione}**.")
-                    st.session_state.codice_corrente = None # Reset dopo associazione automatica
+                    st.success(f"🧠 Riconosciuto! **{tipologia_conosciuta}** associato a **{destinazione}**.")
+                    st.session_state.codice_corrente = None
                 else:
-                    st.warning(f"🔍 Nuovo codice rilevato: **{codice}**")
+                    st.warning(f"🔍 Nuovo codice: **{codice}**. Inserisci il tipo qui sotto.")
             else:
-                st.error("❌ Codice non letto chiaramente. Riprova.")
+                st.error("❌ Codice non letto chiaramente. Riprova o avvicina il codice.")
         
-        # INTERFACCIA DI APPRENDIMENTO LIBERO (appare solo per codici sconosciuti)
-        if st.session_state.codice_corrente and st.session_state.codice_corrente not in carica_memoria_storica():
-            st.write("### ❓ Che tipo di merce è?")
-            
-            # Campo di testo libero dove scrivere qualsiasi cosa
-            nuova_tipologia = st.text_input("Scrivi la tipologia (es. Bancale, Sacco, Fusto, Ruota...):", key="input_tipo").strip()
+        # Interfaccia inserimento manuale tipo merce
+        if st.session_state.codice_corrente:
+            nuova_tipologia = st.text_input("Scrivi la tipologia (es. Bancale, Sacco, Fusto...):", key="input_tipo").strip()
             
             if st.button("Salva tipologia e Associa"):
                 if nuova_tipologia:
                     cod = st.session_state.codice_corrente
-                    # Salva nel database a lungo termine
                     salva_in_memoria_storica(cod, nuova_tipologia)
-                    # Aggiunge al furgone per oggi
                     st.session_state.database_merci[cod] = {
                         "destinazione": destinazione, 
                         "tipologia": nuova_tipologia, 
                         "scaricato": False
                     }
-                    st.success(f"💾 '{nuova_tipologia}' salvato in memoria per il codice {cod}!")
-                    st.session_state.codice_corrente = None # Reset
-                    st.rerun()
+                    st.success(f"💾 Salvato '{nuova_tipologia}' per il codice {cod}!")
+                    st.session_state.codice_corrente = None
                 else:
-                    st.error("Inserisci un nome per la merce prima di salvare.")
+                    st.error("Inserisci un nome per la merce.")
 
-    # Riepilogo carico attuale
     if st.session_state.database_merci:
         st.subheader("📋 Nel furgone adesso:")
         for cod, info in st.session_state.database_merci.items():
@@ -124,21 +121,19 @@ else:
             st.write(f"• **{info['tipologia']}** (Cod: {cod}) — Stato: {stato}")
             
         if tutti_scaricati:
-            st.balloons()
-            st.success("🎉 Tutto scaricato per questa destinazione! Furgone controllato.")
+            st.success("🎉 Tutto scaricato per questa destinazione!")
         else:
-            st.warning("⚠️ Mancano ancora dei colli. Scansiona prima di consegnare:")
-            foto_scarico = st.camera_input("Scansiona per confermare lo scarico", key="scarico_cam")
+            st.warning("⚠️ Mancano ancora colli. Scansiona:")
+            foto_scarico = st.camera_input("Scansiona per scaricare", key="scarico_cam")
             
             if foto_scarico:
                 codice_scansionato = rileva_codice(foto_scarico)
                 if codice_scansionato:
                     if codice_scansionato in merci_da_consegnare:
                         st.session_state.database_merci[codice_scansionato]["scaricato"] = True
-                        st.success(f"🎯 Verificato! Scaricato: {merci_da_consegnare[codice_scansionato]['tipologia']}")
-                        st.rerun()
+                        st.success(f"🎯 Verificato lo scarico!")
                     elif codice_scansionato in st.session_state.database_merci:
                         dest_corretta = st.session_state.database_merci[codice_scansionato]["destinazione"]
-                        st.error(f"🚨 ATTENZIONE! Questo oggetto va a: **{dest_corretta}**! Non scaricarlo qui!")
+                        st.error(f"🚨 ERRORE! Questo oggetto va a: **{dest_corretta}**!")
                     else:
-                        st.error("❓ Questo codice non è stato caricato stamattina.")
+                        st.error("❓ Codice non caricato stamattina.")
